@@ -115,7 +115,7 @@ cancer_data1.show()
 ## Join both the Data on NCT Number
 
 #joining cancer_data2 & cancer_data1 with NCT Number column
-dataframe_join = cancer_data2.join(cancer_data1, cancer_data2['NCT Number'] == cancer_data1['NCT Number'], 'inner') 
+dataframe_join = cancer_data2.join(cancer_data1, ["NCT Number"]) 
 
 ### 1)Location to be United States
 
