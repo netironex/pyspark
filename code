@@ -1,0 +1,150 @@
+## Install Pyspark
+
+!apt-get update
+!apt-get install openjdk-8-jdk-headless -qq > /dev/null
+!wget -q http://archive.apache.org/dist/spark/spark-2.3.1/spark-2.3.1-bin-hadoop2.7.tgz
+!tar xf spark-2.3.1-bin-hadoop2.7.tgz
+!pip install -q findspark
+
+import os
+os.environ["JAVA_HOME"] = "/usr/lib/jvm/java-8-openjdk-amd64"
+os.environ["SPARK_HOME"] = "/content/spark-2.3.1-bin-hadoop2.7"
+
+!ls
+
+import findspark
+findspark.init()
+from pyspark import SparkContext
+
+sc = SparkContext.getOrCreate()
+sc
+
+import pyspark
+from pyspark.sql import SparkSession
+spark = SparkSession.builder.getOrCreate() 
+spark
+
+## Import cancer_data1.csv and cancer_data2.csv from local directory
+
+#to import .csv file from local directory
+from google.colab import files 
+files.upload()
+
+!ls
+
+#import all libraries of pyspark sql 
+from pyspark.sql.types import *
+from pyspark.sql.functions import *
+
+## Operations on cancer_data2.csv
+
+# Define dataframe columns with specific datacolumns, To read .csv file 
+schema = StructType() \
+      .add("NCT Number",StringType(),True) \
+      .add("Title",StringType(),True) \
+      .add("Acronym",StringType(),True) \
+      .add("Status",StringType(),True) \
+      .add("Study Results",StringType(),True) \
+      .add("Conditions",StringType(),True) \
+      .add("Interventions",StringType(),True) \
+      .add("Outcome Measures",StringType(),True) \
+      .add("Sponsor/Collaborators",StringType(),True) \
+      .add("Gender",StringType(),True) \
+      .add("Age",StringType(),True)
+
+cancer_data2 = spark.read.format("csv") \
+      .option("header", True) \
+      .schema(schema) \
+      .load("cancer_data2.csv")
+
+### 1.Modify Status column set- Active, not recruiting as Active & Withdrawn, Recruiting as Inactive
+
+#Replacing the values in a column
+cancer_data2 = cancer_data2.withColumn("Status", when(cancer_data2.Status == "Active, not recruiting","Active & Withdrawn") \
+      .when(cancer_data2.Status == "Recruiting","Inactive") \
+      .otherwise(cancer_data2.Status))
+
+### 2.Split Age Column Age will have - eg. 20 new column will have - eg . Adult, Older Adult
+
+#extract a specific match of numbers from a column, extract a specific match of strings from a column
+cancer_data2 = cancer_data2.withColumn('year', regexp_extract(cancer_data2.Age, "(\d{2,})", 1))\
+               .withColumn('new_age', regexp_extract(cancer_data2.Age, "\((.*?)\)", 1 )).drop('Age')
+
+### 3.Title - remove all symbol chars
+
+#Removing all the symbols by using regexp replace function
+cancer_data2 = cancer_data2.withColumn("Title", regexp_replace(col("Title"), "[^A-Za-z0-9 ]", ""))
+
+### 4.Remove unwanted or blank rows
+
+cancer_data2.count()
+
+#drop the null values in column if all the values in rows are null
+cancer_data2 = cancer_data2.na.drop(how='all') 
+
+cancer_data2.count()
+
+### 5.Remove Interventions column
+
+#droping interventions column from dataset
+cancer_data2 = cancer_data2.drop(cancer_data2.Interventions) 
+
+cancer_data2.show()
+
+# Operations on cancer_data1.csv
+
+#reading cancer_data1.csv file
+cancer_data1 = spark.read.csv("cancer_data1.csv", header = True) 
+
+### 1.Phases column blank rows removed
+
+cancer_data1.count()
+
+#dropping null values from phases column
+cancer_data1 = cancer_data1.na.drop(subset=["Phases"])
+
+cancer_data1.count()
+
+### 2.Remove Study Documents, Results First Posted column
+
+#Removing Study Documents, Results First Posted columns from dataframe
+cancer_data1 = cancer_data1.drop('Study Documents','Results First Posted')
+
+cancer_data1.show()
+
+## Join both the Data on NCT Number
+
+#joining cancer_data2 & cancer_data1 with NCT Number column
+dataframe_join = cancer_data2.join(cancer_data1, cancer_data2['NCT Number'] == cancer_data1['NCT Number'], 'inner') 
+
+### 1)Location to be United States
+
+#filtering data which having location as united states
+dataframe_us = dataframe_join.filter(dataframe_join.Locations.contains('United States')) 
+
+dataframe_us.show()
+
+### 2)Primary Completion date and Completion date difference two years
+
+#converting datatypes of "Primary Completion Date" and "Completion Date" columns into datetype 
+datatype_chng = dataframe_join \
+  .withColumn("Primary Completion Date" ,
+              to_date(col("Primary Completion Date"), "dd-MMM-yy")) \
+  .withColumn("Completion Date",
+              to_date(col("Completion Date"), "dd-MMM-yy"))             
+
+#filtering data having 2 years difference (months/12) in it
+year_two = datatype_chng \
+  .withColumn('diff_yr', (months_between(col("Completion Date"), col("Primary Completion Date")) / 12).cast('int')) \
+  .filter(col("diff_yr").contains('2'))
+
+year_two.show()
+
+### 3)Primary Completion date and Completion date difference more than two
+
+#filtering data having more than 2 years difference in it
+year_greater_two = datatype_chng \
+  .withColumn('diff_yr', (months_between(col("Completion Date"), col("Primary Completion Date")) / 12).cast('int')) \
+  .filter(col("diff_yr")>2)
+
+year_greater_two.show()
